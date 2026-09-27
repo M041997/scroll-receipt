@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Drop in your TikTok data export and get an itemised receipt of the time it cost. Runs entirely in your browser; nothing is uploaded.">
+<title>Scroll Receipt</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=Instrument+Sans:wght@400;500;600&family=Martian+Mono:wght@400;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #DCE0E6;
+  --ink: #1B1D22;
+  --muted: #555C6A;
+  --line: #B7BFCB;
+  --panel: #E9ECF0;
+  --bar: #44506A;
+  --hi: #B8323F;
+  --paper: #FBFBF8;
+  --paper-ink: #202127;
+  --paper-muted: #74767E;
+  --paper-red: #B02E3B;
+  --focus: #2F5FD0;
+  --display: "Bricolage Grotesque", "Arial Narrow", system-ui, sans-serif;
+  --body: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Martian Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #13161B; --ink: #E6E8EC; --muted: #9AA1AE; --line: #2C323C;
+    --panel: #1B1F26; --bar: #7E8CA6; --hi: #E86A74; --paper: #ECEBE5; --focus: #8AA8F0;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #13161B; --ink: #E6E8EC; --muted: #9AA1AE; --line: #2C323C;
+  --panel: #1B1F26; --bar: #7E8CA6; --hi: #E86A74; --paper: #ECEBE5; --focus: #8AA8F0;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.55 var(--body); }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 64px; display: grid; gap: 56px; }
+h1, h2 { font-family: var(--display); text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2.4rem, 6vw, 4.2rem); line-height: .98; font-weight: 800; letter-spacing: -.02em; }
+h2 { font-size: 1.6rem; font-weight: 800; letter-spacing: -.01em; }
+p { margin: 0; max-width: 62ch; }
+.muted { color: var(--muted); }
+.eyebrow { font: 600 .72rem/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+a { color: inherit; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; border-radius: 4px; }
+
+/* Top: intro + receipt */
+.top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 400px); gap: 48px; align-items: start; }
+.intro { display: grid; gap: 22px; padding-top: 8px; }
+.intro .lede { font-size: 1.12rem; }
+.drop { display: grid; gap: 6px; padding: 22px; border: 2px dashed var(--line); border-radius: 14px; background: var(--panel); cursor: pointer; transition: border-color .15s, background .15s; }
+.drop:hover, .drop.over { border-color: var(--bar); }
+.drop strong { font-family: var(--display); font-size: 1.25rem; font-weight: 800; }
+.drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.drop:focus-within { outline: 3px solid var(--focus); outline-offset: 3px; }
+.status { font-size: .92rem; min-height: 1.5em; }
+.status.err { color: var(--hi); font-weight: 600; }
+.pill { display: inline-flex; align-items: center; gap: 8px; font: 600 .72rem/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; padding: 7px 10px; border-radius: 999px; background: var(--ink); color: var(--bg); justify-self: start; }
+.pill.sample { background: var(--hi); color: #fff; }
+.steps { margin: 0; padding-left: 1.3em; display: grid; gap: 6px; color: var(--muted); font-size: .95rem; }
+.steps b { color: var(--ink); font-weight: 600; }
+details summary { cursor: pointer; font-weight: 600; }
+details[open] summary { margin-bottom: 10px; }
+
+/* Receipt */
+.receipt-holder { filter: drop-shadow(0 14px 22px rgba(10, 14, 22, .22)); position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); }
+.receipt { position: relative; background: var(--paper); color: var(--paper-ink); font: 400 .78rem/1.7 var(--mono); padding: 30px 26px 26px; margin-bottom: 10px; }
+.receipt::before, .receipt::after { content: ""; position: absolute; left: 0; right: 0; height: 10px; background-size: 14px 10px; background-repeat: repeat-x; }
+.receipt::before { top: -10px; background-image: linear-gradient(45deg, transparent 50%, var(--paper) 50%), linear-gradient(-45deg, transparent 50%, var(--paper) 50%); }
+.receipt::after { bottom: -10px; background-image: linear-gradient(135deg, var(--paper) 50%, transparent 50%), linear-gradient(-135deg, var(--paper) 50%, transparent 50%); }
+.r-head { text-align: center; display: grid; gap: 2px; margin-bottom: 14px; }
+.r-head .shop { font-weight: 600; font-size: 1.05rem; letter-spacing: .18em; }
+.r-rule { border: 0; border-top: 1px dashed var(--paper-muted); margin: 12px 0; }
+.r-row { display: flex; gap: 8px; align-items: baseline; }
+.r-row .k { flex: 1 1 auto; display: flex; gap: 6px; min-width: 0; }
+.r-row .k::after { content: ""; flex: 1; border-bottom: 1px dotted var(--paper-muted); transform: translateY(-4px); min-width: 12px; }
+.r-row .v { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.r-total { display: flex; justify-content: space-between; align-items: baseline; font-weight: 600; font-size: 1.05rem; gap: 10px; }
+.r-total .v { color: var(--paper-red); font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+.r-sub { color: var(--paper-muted); font-size: .72rem; }
+.r-could { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.r-could b { font-weight: 600; }
+.r-foot { text-align: center; color: var(--paper-muted); margin-top: 14px; display: grid; gap: 8px; justify-items: center; }
+.barcode { display: flex; height: 38px; gap: 2px; justify-content: center; }
+.barcode i { display: block; background: var(--paper-ink); }
+.r-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+button { font: 600 .9rem var(--body); padding: 10px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+button:hover { border-color: var(--bar); }
+
+/* Charts */
+.section { display: grid; gap: 18px; }
+.section-head { display: grid; gap: 6px; }
+.charts { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 32px; }
+.chart { display: grid; gap: 10px; min-width: 0; }
+.chart h3 { margin: 0; font: 600 1rem var(--body); }
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart svg text { fill: var(--muted); font: 11px var(--mono); }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: .82rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.fact { background: var(--bg); padding: 18px; display: grid; gap: 4px; align-content: start; }
+.fact .n { font: 800 1.9rem/1.1 var(--display); font-variant-numeric: tabular-nums; }
+.fact .l { font-size: .9rem; color: var(--muted); }
+
+.next { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; }
+.next div { display: grid; gap: 6px; align-content: start; border-top: 2px solid var(--ink); padding-top: 12px; }
+.next b { font-family: var(--display); font-size: 1.15rem; }
+.method { font-size: .88rem; color: var(--muted); max-width: 80ch; }
+
+@media (max-width: 860px) {
+  .top { grid-template-columns: minmax(0, 1fr); }
+  .receipt-holder { position: static; max-width: 420px; }
+  .charts { grid-template-columns: minmax(0, 1fr); }
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <section class="top">
+    <div class="intro">
+      <span class="eyebrow">Anti-brainrot · private by design</span>
+      <h1>Get the receipt for your scrolling.</h1>
+      <p class="lede">Load your TikTok data export. This page counts every video in your watch history and adds up the time it cost you. The file is read inside this browser tab and never uploaded anywhere.</p>
+
+      <label class="drop" id="drop" for="file">
+        <input type="file" id="file" accept=".zip,.json,.txt">
+        <strong>Drop your export here</strong>
+        <span class="muted">or tap to choose it. Accepts the .zip TikTok sends you, or the .json / Watch History .txt inside it.</span>
+      </label>
+      <div class="status" id="status" role="status" aria-live="polite"></div>
+      <span class="pill sample" id="modePill">Example data · not yours yet</span>
+
+      <details id="howto">
+        <summary>How to download your TikTok data</summary>
+        <ol class="steps">
+          <li>In TikTok, go to <b>Profile</b> and tap the <b>☰</b> menu.</li>
+          <li>Open <b>Settings and privacy → Account → Download your data</b>.</li>
+          <li>Select <b>All data</b>, set the file format to <b>JSON</b>, and tap <b>Request data</b>.</li>
+          <li>TikTok takes a few days. When it's ready, download the .zip from the <b>Download data</b> tab.</li>
+          <li>Drop that .zip on this page.</li>
+        </ol>
+      </details>
+    </div>
+
+    <div class="receipt-holder">
+      <article class="receipt" id="receipt" aria-label="Scroll receipt"></article>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <span class="eyebrow">Where the hours went</span>
+      <h2 id="chartTitle">Every day in the file</h2>
+    </div>
+    <div class="charts">
+      <div class="chart">
+        <h3>Hours watched per day</h3>
+        <div id="dailyChart"></div>
+        <div class="legend">
+          <span><i class="swatch" style="background:var(--bar)"></i>Hours that day</span>
+          <span><i class="swatch" style="background:var(--ink);height:3px"></i>7-day average</span>
+          <span><i class="swatch" style="background:var(--hi)"></i>Zero-video day</span>
+        </div>
+      </div>
+      <div class="chart">
+        <h3>Time of day <span class="muted" id="tzNote"></span></h3>
+        <div id="hourChart"></div>
+      </div>
+    </div>
+    <div class="facts" id="facts"></div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <span class="eyebrow">Now what</span>
+      <h2>Make the next receipt shorter</h2>
+    </div>
+    <div class="next">
+      <div><b>Remove the easy path</b><p class="muted">Delete the app, then block the website too. Most relapses come through the browser or a reinstall, not willpower.</p></div>
+      <div><b>Watch your peak hour</b><p class="muted">Your heaviest hour is on the receipt. Set a Screen Time downtime or Focus mode that covers it every day.</p></div>
+      <div><b>Put something in the gap</b><p class="muted">Pick one thing to do with the reclaimed time: drawing, a language, a walk. Count those hours the way you just counted these.</p></div>
+      <div><b>Come back in 30 days</b><p class="muted">Request a new export and load it here. The zero-video days on the chart are the ones to grow.</p></div>
+    </div>
+    <p class="method"><b>How time is estimated.</b> The export has a timestamp for each video, not a watch duration. A gap of under 5 minutes before the next video counts as watching. A longer gap counts as 15 seconds, for the last video before you put the phone down. TikTok stores times in UTC; this page shifts them to your device's time zone before finding your peak hour.</p>
+  </section>
+</main>
+
+<script>
+(() => {
+  const GAP_CAP = 300, TAIL = 15;
+  const $ = id => document.getElementById(id);
+  const nf = n => Math.round(n).toLocaleString();
+  const fmtDate = d => d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  const hourLabel = h => (h % 12 || 12) + (h < 12 ? ' AM' : ' PM');
+  const dayKey = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const hm = h => { const m = Math.round(h * 60); return Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm'; };
+  const DATE_RE = /(\d{4})-(\d\d)-(\d\d)[ T](\d\d):(\d\d):(\d\d)/;
+  const parseUtc = s => { const m = DATE_RE.exec(s); return m ? Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : NaN; };
+
+  // ---------- analysis ----------
+  function analyze(times, extras) {
+    times.sort((a, b) => a - b);
+    const hours = new Array(24).fill(0);
+    const byDay = new Map();
+    let total = 0, sess = 0, sessStart = times[0], longest = { h: 0, at: times[0] }, sessions = 1;
+    for (let i = 0; i < times.length; i++) {
+      const gap = i + 1 < times.length ? (times[i + 1] - times[i]) / 1000 : Infinity;
+      const dur = gap <= GAP_CAP ? gap : TAIL;
+      const d = new Date(times[i]);
+      hours[d.getHours()] += dur;
+      const k = dayKey(d);
+      const rec = byDay.get(k) || { s: 0, n: 0 };
+      rec.s += dur; rec.n++; byDay.set(k, rec);
+      total += dur; sess += dur;
+      if (gap > GAP_CAP) {
+        if (sess > longest.h) longest = { h: sess, at: sessStart };
+        sess = 0; sessStart = times[i + 1]; if (i + 1 < times.length) sessions++;
+      }
+    }
+    const first = new Date(times[0]), last = new Date(times[times.length - 1]);
+    const days = [];
+    const cur = new Date(first.getFullYear(), first.getMonth(), first.getDate());
+    const end = new Date(last.getFullYear(), last.getMonth(), last.getDate());
+    while (cur <= end) {
+      const r = byDay.get(dayKey(cur));
+      days.push({ date: new Date(cur), h: r ? r.s / 3600 : 0, n: r ? r.n : 0 });
+      cur.setDate(cur.getDate() + 1);
+    }
+    let breaks = 0, zero = 0, run = 0, longestBreak = 0;
+    for (const d of days) {
+      if (d.n === 0) { zero++; run++; if (run === 1) breaks++; longestBreak = Math.max(longestBreak, run); } else run = 0;
+    }
+    const totalH = total / 3600;
+    const peak = hours.indexOf(Math.max(...hours));
+    const night = (hours.slice(0, 6).reduce((a, b) => a + b, 0) / total) * 100;
+    const maxDay = days.reduce((a, d) => (d.h > a.h ? d : a), days[0]);
+    return {
+      count: times.length, totalH, first, last, days, hours: hours.map(s => s / 3600), peak, night,
+      perDay: totalH / days.length, videosPerDay: times.length / days.length,
+      activeDays: days.length - zero, zero, breaks, longestBreak, sessions,
+      longest: { h: longest.h / 3600, at: new Date(longest.at) }, maxDay,
+      perYear: (totalH / days.length) * 365, extras: extras || {},
+    };
+  }
+
+  // ---------- rendering ----------
+  function row(k, v) { return `<div class="r-row"><span class="k">${k}</span><span class="v">${v}</span></div>`; }
+
+  function renderReceipt(s, sample) {
+    const could = [
+      [s.totalH / 600, 'Spanish courses to working fluency', '600 h each'],
+      [s.totalH / 7, 'novels read cover to cover', '7 h each'],
+      [s.totalH / 40, 'full-time work weeks', '40 h each'],
+      [s.totalH / 0.83, '5 km walks', '50 min each'],
+    ];
+    const bars = [];
+    let seed = Math.floor(s.totalH * 1000 + s.count);
+    for (let i = 0; i < 46; i++) { seed = (seed * 1103515245 + 12345) & 0x7fffffff; bars.push(1 + (seed % 3)); }
+    const ex = s.extras;
+    $('receipt').innerHTML = `
+      <div class="r-head">
+        <span class="shop">SCROLL RECEIPT</span>
+        <span>Merchant: the For You feed</span>
+        <span class="r-sub">${fmtDate(s.first)} – ${fmtDate(s.last)}${sample ? ' · EXAMPLE' : ''}</span>
+      </div>
+      <hr class="r-rule">
+      ${row('Days in file', nf(s.days.length))}
+      ${row('Days with scrolling', nf(s.activeDays))}
+      ${row('Videos watched', nf(s.count))}
+      ${row('Videos per day', nf(s.videosPerDay))}
+      ${row('Average per day', hm(s.perDay))}
+      ${row('Longest sitting', hm(s.longest.h))}
+      ${row('Peak hour', hourLabel(s.peak))}
+      ${ex.favs != null ? row('Saved to favourites', nf(ex.favs)) : ''}
+      ${ex.likes != null ? row('Liked', nf(ex.likes)) : ''}
+      <hr class="r-rule">
+      <div class="r-total"><span>TOTAL TIME</span><span class="v">${nf(s.totalH)} h</span></div>
+      <div class="r-sub">= ${(s.totalH / 16).toFixed(1)} waking days · ${nf(s.perYear)} h a year at this rate</div>
+      <hr class="r-rule">
+      <div>That time could have paid for:</div>
+      <ul class="r-could">${could.map(([n, what, unit]) => `<li><b>${n >= 10 ? nf(n) : n.toFixed(1)}</b> ${what} <span class="r-sub">(${unit})</span></li>`).join('')}</ul>
+      <hr class="r-rule">
+      ${row('Last video in file', fmtDate(s.last))}
+      ${row('Zero-video days', `${nf(s.zero)} of ${nf(s.days.length)}`)}
+      <div class="r-foot">
+        <span>NO REFUNDS · TIME IS NON-RETURNABLE</span>
+        <div class="barcode" aria-hidden="true">${bars.map(w => `<i style="width:${w}px"></i>`).join('')}</div>
+      </div>`;
+  }
+
+  function niceMax(v) { const steps = [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 24]; return steps.find(x => x >= v) || Math.ceil(v); }
+
+  function renderDaily(s) {
+    const W = 720, H = 220, L = 30, R = 6, T = 8, B = 26;
+    const n = s.days.length, bw = (W - L - R) / n;
+    const max = niceMax(Math.max(...s.days.map(d => d.h), 1));
+    const step = max <= 6 ? 1 : max <= 12 ? 2 : 4;
+    const y = h => T + (H - T - B) * (1 - h / max);
+    let g = '';
+    for (let v = 0; v <= max; v += step) g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v}h</text>`;
+    let bars = '';
+    s.days.forEach((d, i) => {
+      const x = L + i * bw;
+      if (d.n === 0) bars += `<rect x="${x}" y="${y(0) - 4}" width="${Math.max(bw - 1, 1)}" height="4" fill="var(--hi)"><title>${fmtDate(d.date)}: zero videos</title></rect>`;
+      else bars += `<rect x="${x}" y="${y(d.h)}" width="${Math.max(bw - (bw > 3 ? 1 : 0), 0.6)}" height="${y(0) - y(d.h)}" fill="var(--bar)" opacity=".75"><title>${fmtDate(d.date)}: ${hm(d.h)}, ${nf(d.n)} videos</title></rect>`;
+    });
+    const pts = s.days.map((d, i) => {
+      const win = s.days.slice(Math.max(0, i - 6), i + 1);
+      return `${(L + i * bw + bw / 2).toFixed(1)},${y(win.reduce((a, b) => a + b.h, 0) / win.length).toFixed(1)}`;
+    }).join(' ');
+    // month ticks
+    let ticks = '', lastM = -1, lastX = -99;
+    s.days.forEach((d, i) => {
+      if (d.date.getDate() === 1 || (i === 0 && d.date.getDate() <= 15)) {
+        const x = L + i * bw;
+        if (d.date.getMonth() !== lastM && x - lastX > 42) {
+          ticks += `<text x="${x}" y="${H - 6}">${d.date.toLocaleDateString(undefined, { month: 'short' })}</text>`;
+          lastX = x;
+        }
+        lastM = d.date.getMonth();
+      }
+    });
+    $('dailyChart').innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Hours watched per day">${g}${bars}<polyline points="${pts}" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linejoin="round"/>${ticks}</svg>`;
+  }
+
+  function renderHours(s) {
+    const W = 360, H = 220, L = 34, R = 4, T = 8, B = 26;
+    const perDay = s.hours.map(h => (h / s.days.length) * 60); // minutes per day in that hour
+    const max = Math.max(...perDay);
+    const top = [5, 10, 15, 20, 30, 40, 60].find(v => v >= max) || Math.ceil(max);
+    const step = top <= 10 ? 5 : top <= 20 ? 5 : top <= 40 ? 10 : 20;
+    const y = v => T + (H - T - B) * (1 - v / top);
+    const bw = (W - L - R) / 24;
+    let g = '';
+    for (let v = 0; v <= top; v += step) g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v}m</text>`;
+    const bars = perDay.map((v, h) => `<rect x="${L + h * bw + 1}" y="${y(v)}" width="${bw - 2}" height="${y(0) - y(v)}" fill="${h === s.peak ? 'var(--hi)' : 'var(--bar)'}"><title>${hourLabel(h)}: ${v.toFixed(1)} min per day</title></rect>`).join('');
+    const labels = [0, 6, 12, 18].map(h => `<text x="${L + h * bw + bw / 2}" y="${H - 6}" text-anchor="middle">${['12a', '6a', '12p', '6p'][h / 6]}</text>`).join('');
+    $('hourChart').innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Average minutes per day by hour">${g}${bars}${labels}</svg>`;
+    let tz = ''; try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) {}
+    $('tzNote').textContent = `· avg minutes per day${tz ? ', ' + tz : ''}`;
+  }
+
+  function renderFacts(s) {
+    const facts = [
+      [hm(s.perDay), 'average per day, counting zero days'],
+      [hm(s.maxDay.h), `worst day, ${fmtDate(s.maxDay.date)}`],
+      [nf(s.sessions), 'separate sittings (a gap of 5+ minutes starts a new one)'],
+      [`${s.night.toFixed(1)}%`, 'of the time fell between midnight and 6 AM'],
+      [nf(s.breaks), s.breaks === 1 ? 'break of one or more zero days' : 'breaks of one or more zero days'],
+      [`${s.longestBreak} day${s.longestBreak === 1 ? '' : 's'}`, 'longest break in the file'],
+    ];
+    $('facts').innerHTML = facts.map(([n, l]) => `<div class="fact"><span class="n">${n}</span><span class="l">${l}</span></div>`).join('');
+  }
+
+  let current = null;
+  function render(s, sample) {
+    current = s;
+    renderReceipt(s, sample);
+    renderDaily(s); renderHours(s); renderFacts(s);
+    const pill = $('modePill');
+    pill.classList.toggle('sample', sample);
+    pill.textContent = sample ? 'Example data · not yours yet' : `Your export · ${nf(s.count)} videos`;
+    $('chartTitle').textContent = sample ? 'Every day in the example file' : 'Every day in your file';
+    if (!$('receipt').nextElementSibling) {
+      const actions = document.createElement('div');
+      actions.className = 'r-actions';
+      actions.innerHTML = '<button type="button" id="copyBtn">Copy receipt as text</button>';
+      $('receipt').after(actions);
+      $('copyBtn').addEventListener('click', copyReceipt);
+    }
+  }
+
+  function copyReceipt() {
+    const s = current, btn = $('copyBtn');
+    const text = [
+      'SCROLL RECEIPT', `${fmtDate(s.first)} – ${fmtDate(s.last)}`,
+      `Videos watched: ${nf(s.count)}`, `Average per day: ${hm(s.perDay)}`, `Peak hour: ${hourLabel(s.peak)}`,
+      `TOTAL: ${nf(s.totalH)} hours (${nf(s.perYear)} h a year at this rate)`, 'No refunds. Time is non-returnable.',
+    ].join('\n');
+    const done = () => { btn.textContent = 'Copied'; setTimeout(() => (btn.textContent = 'Copy receipt as text'), 1600); };
+    try {
+      navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+    } catch (e) { fallbackCopy(text, done); }
+  }
+  function fallbackCopy(text, done) {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) { setStatus('Select the receipt text and copy it by hand.', true); }
+    ta.remove();
+  }
+
+  // ---------- sample data ----------
+  function sampleTimes() {
+    let a = 20260927;
+    const rnd = () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    const times = [];
+    const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - 120);
+    const breaks = new Set([38, 39, 40, 41, 77, 78, 101]);
+    const startHours = [7, 8, 12, 12, 13, 13, 13, 14, 15, 16, 17, 20, 21, 21, 22, 23];
+    for (let d = 0; d < 120; d++) {
+      if (breaks.has(d)) continue;
+      const day = new Date(start); day.setDate(start.getDate() + d);
+      const nSess = 3 + Math.floor(rnd() * 6) + (d > 60 ? 1 : 0);
+      for (let k = 0; k < nSess; k++) {
+        let t = day.getTime() + (startHours[Math.floor(rnd() * startHours.length)] * 3600 + rnd() * 3600) * 1000;
+        const len = (8 + rnd() * rnd() * 110) * 60 * 1000, stop = t + len;
+        while (t < stop) { times.push(t); t += (6 + rnd() * 22) * 1000; }
+      }
+    }
+    return times;
+  }
+
+  // ---------- file loading ----------
+  function setStatus(msg, err) { const el = $('status'); el.textContent = msg; el.classList.toggle('err', !!err); }
+
+  function findKey(o, re, depth) {
+    if (!o || typeof o !== 'object' || depth > 5) return null;
+    for (const k of Object.keys(o)) if (re.test(k)) return o[k];
+    for (const k of Object.keys(o)) {
+      const v = o[k];
+      if (v && typeof v === 'object' && !Array.isArray(v)) { const r = findKey(v, re, depth + 1); if (r) return r; }
+    }
+    return null;
+  }
+  const firstArray = v => Array.isArray(v) ? v : v && typeof v === 'object' ? Object.values(v).find(Array.isArray) || null : null;
+
+  function fromJson(d) {
+    const list = firstArray(findKey(d, /^(watch history|video browsing history)$/i, 0));
+    if (!list) return null;
+    const times = [];
+    for (const r of list) { const t = parseUtc(r && (r.Date || r.date) || ''); if (!isNaN(t)) times.push(t); }
+    const favs = firstArray(findKey(d, /^favorite videos$/i, 0));
+    const likes = firstArray(findKey(d, /^like list$/i, 0));
+    return { times, extras: { favs: favs ? favs.length : null, likes: likes ? likes.length : null } };
+  }
+  function fromTxt(text) {
+    const times = [], re = /Date:\s*(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)/g;
+    let m; while ((m = re.exec(text))) times.push(parseUtc(m[1]));
+    return times.length ? { times, extras: {} } : null;
+  }
+
+  async function handleFile(file) {
+    if (!file) return;
+    setStatus(`Reading ${file.name}…`);
+    await new Promise(r => setTimeout(r, 30));
+    try {
+      let res = null;
+      if (/\.zip$/i.test(file.name)) {
+        if (!window.JSZip) throw new Error('The zip reader did not load. Unzip the file and drop the .json inside instead.');
+        const zip = await JSZip.loadAsync(file);
+        const entries = Object.values(zip.files).filter(f => !f.dir);
+        for (const f of entries.filter(f => /\.json$/i.test(f.name))) {
+          setStatus(`Reading ${f.name}…`);
+          res = fromJson(JSON.parse(await f.async('string')));
+          if (res) break;
+        }
+        if (!res) for (const f of entries.filter(f => /(watch|browsing) history.*\.txt$/i.test(f.name))) {
+          res = fromTxt(await f.async('string')); if (res) break;
+        }
+      } else {
+        const text = await file.text();
+        res = /^\s*[{[]/.test(text) ? fromJson(JSON.parse(text)) : fromTxt(text);
+      }
+      if (!res || !res.times.length) throw new Error("No watch history found in that file. Request the export again with “All data” selected, and pick JSON as the format.");
+      setStatus(`Adding up ${nf(res.times.length)} videos…`);
+      await new Promise(r => setTimeout(r, 30));
+      render(analyze(res.times, res.extras), false);
+      setStatus(`Done. Read ${nf(res.times.length)} videos from ${file.name}. Nothing left this tab.`);
+    } catch (e) {
+      setStatus(e instanceof SyntaxError ? 'That file isn’t valid JSON. Drop the .zip TikTok sent you, unchanged.' : e.message, true);
+    }
+  }
+
+  $('file').addEventListener('change', e => handleFile(e.target.files[0]));
+  const drop = $('drop');
+  ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => handleFile(e.dataTransfer.files[0]));
+  document.addEventListener('dragover', e => e.preventDefault());
+  document.addEventListener('drop', e => { e.preventDefault(); if (!drop.contains(e.target)) handleFile(e.dataTransfer.files[0]); });
+
+  render(analyze(sampleTimes(), { favs: 2140, likes: 3905 }), true);
+})();
+</script>
+</body>
+</html>
