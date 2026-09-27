@@ -262,10 +262,10 @@ button:hover { border-color: var(--bar); }
 
   function renderReceipt(s, sample) {
     const could = [
-      [s.totalH / 600, 'Spanish courses to working fluency', '600 h each'],
-      [s.totalH / 7, 'novels read cover to cover', '7 h each'],
-      [s.totalH / 40, 'full-time work weeks', '40 h each'],
-      [s.totalH / 0.83, '5 km walks', '50 min each'],
+      [s.totalH / 2, 'movies watched', '2 h each'],
+      [s.totalH / 7, 'books read cover to cover', '7 h each'],
+      [s.totalH / 8, 'full nights of sleep', '8 h each'],
+      [s.totalH / 600, 'new languages to conversational level', 'about 600 h each'],
     ];
     const bars = [];
     let seed = Math.floor(s.totalH * 1000 + s.count);
